@@ -1,0 +1,11 @@
+node_modules/
+dist/
+data/
+uploads/*.jpg
+uploads/*.jpeg
+uploads/*.png
+uploads/*.webp
+uploads/*.heic
+*.log
+.DS_Store
+.env
