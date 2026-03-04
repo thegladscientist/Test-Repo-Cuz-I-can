@@ -69,8 +69,8 @@ router.get('/reports/:id', (req, res) => {
 router.post('/reports', upload.array('photos', 5), (req, res) => {
   const { description, severity, latitude, longitude, address, reporter_name } = req.body;
 
-  if (!description || !severity || !latitude || !longitude) {
-    return res.status(400).json({ error: 'Missing required fields: description, severity, latitude, longitude' });
+  if (!latitude || !longitude) {
+    return res.status(400).json({ error: 'Missing required fields: latitude, longitude' });
   }
 
   const id = uuidv4();
@@ -79,10 +79,42 @@ router.post('/reports', upload.array('photos', 5), (req, res) => {
   db.prepare(`
     INSERT INTO reports (id, description, severity, latitude, longitude, address, reporter_name, photos)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, description, severity, Number(latitude), Number(longitude), address || '', reporter_name || 'Anonymous', JSON.stringify(photos));
+  `).run(id, description || '', severity || 'medium', Number(latitude), Number(longitude), address || '', reporter_name || 'Anonymous', JSON.stringify(photos));
 
   const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(id);
   res.status(201).json({ ...report, photos: JSON.parse(report.photos) });
+});
+
+router.patch('/reports/:id', upload.array('photos', 5), (req, res) => {
+  const report = db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+  if (!report) return res.status(404).json({ error: 'Report not found' });
+
+  const { description, severity, address } = req.body;
+  const sets = [];
+  const params = [];
+
+  if (description !== undefined) { sets.push('description = ?'); params.push(description); }
+  if (severity && ['low', 'medium', 'high', 'critical'].includes(severity)) { sets.push('severity = ?'); params.push(severity); }
+  if (address !== undefined) { sets.push('address = ?'); params.push(address); }
+
+  const newPhotos = (req.files || []).map(f => `/uploads/${f.filename}`);
+  if (newPhotos.length > 0) {
+    const existing = JSON.parse(report.photos || '[]');
+    const merged = [...existing, ...newPhotos].slice(0, 5);
+    sets.push('photos = ?');
+    params.push(JSON.stringify(merged));
+  }
+
+  if (sets.length === 0) {
+    return res.json({ ...report, photos: JSON.parse(report.photos || '[]') });
+  }
+
+  sets.push("updated_at = datetime('now')");
+  params.push(req.params.id);
+
+  db.prepare(`UPDATE reports SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+  const updated = db.prepare('SELECT * FROM reports WHERE id = ?').get(req.params.id);
+  res.json({ ...updated, photos: JSON.parse(updated.photos || '[]') });
 });
 
 router.patch('/reports/:id/status', (req, res) => {

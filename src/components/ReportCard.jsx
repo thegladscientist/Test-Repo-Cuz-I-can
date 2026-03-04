@@ -5,6 +5,7 @@ import TimeAgo from './TimeAgo';
 
 export default function ReportCard({ report }) {
   const thumb = report.photos?.[0];
+  const hasDescription = report.description && report.description.trim().length > 0;
 
   return (
     <Link to={`/report/${report.id}`} className="card block transition hover:shadow-md hover:border-brand-200">
@@ -18,10 +19,19 @@ export default function ReportCard({ report }) {
           <div className="flex items-center gap-2 mb-1">
             <SeverityBadge severity={report.severity} />
             <StatusBadge status={report.status} />
+            {!hasDescription && !thumb && (
+              <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-semibold text-brand-700">Quick pin</span>
+            )}
           </div>
-          <p className="text-sm font-medium text-gray-900 line-clamp-2">{report.description}</p>
+          {hasDescription ? (
+            <p className="text-sm font-medium text-gray-900 line-clamp-2">{report.description}</p>
+          ) : (
+            <p className="text-sm italic text-gray-400">
+              {report.address || `Pothole at ${Number(report.latitude).toFixed(4)}, ${Number(report.longitude).toFixed(4)}`}
+            </p>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
-            {report.address && (
+            {report.address && hasDescription && (
               <span className="flex items-center gap-1 truncate max-w-[200px]">
                 <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" /></svg>
                 {report.address}

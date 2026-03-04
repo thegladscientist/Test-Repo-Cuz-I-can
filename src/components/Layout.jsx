@@ -1,9 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 
-const navItems = [
+const sideNavItems = [
   { path: '/', label: 'Feed', icon: ListIcon },
   { path: '/map', label: 'Map', icon: MapIcon },
-  { path: '/new', label: 'Report', icon: PlusIcon },
 ];
 
 export default function Layout({ children }) {
@@ -29,7 +28,7 @@ export default function Layout({ children }) {
 
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white/90 backdrop-blur-lg safe-area-pb">
         <div className="mx-auto flex h-16 max-w-2xl items-center justify-around">
-          {navItems.map(({ path, label, icon: Icon }) => {
+          {sideNavItems.map(({ path, label, icon: Icon }) => {
             const active = location.pathname === path;
             return (
               <Link
@@ -46,6 +45,19 @@ export default function Layout({ children }) {
               </Link>
             );
           })}
+          <Link
+            to="/new"
+            className="flex flex-col items-center gap-0.5"
+          >
+            <span className={`flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition -mt-5 ${
+              location.pathname === '/new'
+                ? 'bg-brand-800 ring-4 ring-brand-200'
+                : 'bg-brand-700 hover:bg-brand-800'
+            }`}>
+              <PinIcon />
+            </span>
+            <span className="text-[10px] font-semibold text-brand-700">Drop Pin</span>
+          </Link>
         </div>
       </nav>
     </div>
@@ -68,10 +80,11 @@ function MapIcon({ active }) {
   );
 }
 
-function PlusIcon({ active }) {
+function PinIcon() {
   return (
-    <svg className={`h-6 w-6 ${active ? 'text-brand-700' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
     </svg>
   );
 }

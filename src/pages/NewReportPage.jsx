@@ -1,55 +1,118 @@
-import { useState, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api';
-import LocationPicker from '../components/LocationPicker';
 import { useUserName } from '../hooks/useUserName';
 
-const SEVERITY_OPTIONS = [
-  { value: 'low', label: 'Low', desc: 'Minor, passable', color: 'border-green-400 bg-green-50 text-green-800' },
-  { value: 'medium', label: 'Medium', desc: 'Noticeable bump', color: 'border-yellow-400 bg-yellow-50 text-yellow-800' },
-  { value: 'high', label: 'High', desc: 'Risk of damage', color: 'border-orange-400 bg-orange-50 text-orange-800' },
-  { value: 'critical', label: 'Critical', desc: 'Dangerous, avoid', color: 'border-red-400 bg-red-50 text-red-800' },
+const LEBANON_CENTER = [33.8547, 35.8623];
+
+const SEVERITY_QUICK = [
+  { value: 'low', emoji: '🟢', label: 'Low' },
+  { value: 'medium', emoji: '🟡', label: 'Med' },
+  { value: 'high', emoji: '🟠', label: 'High' },
+  { value: 'critical', emoji: '🔴', label: 'Crit' },
 ];
 
 export default function NewReportPage() {
   const navigate = useNavigate();
-  const [userName, setUserName] = useUserName();
-  const fileRef = useRef(null);
+  const [userName] = useUserName();
+  const mapRef = useRef(null);
+  const mapInstance = useRef(null);
+  const markerRef = useRef(null);
+  const leafletRef = useRef(null);
 
-  const [form, setForm] = useState({
-    description: '',
-    severity: 'medium',
-    address: '',
-  });
   const [location, setLocation] = useState(null);
-  const [photos, setPhotos] = useState([]);
-  const [previews, setPreviews] = useState([]);
+  const [severity, setSeverity] = useState('medium');
+  const [locating, setLocating] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [submitted, setSubmitted] = useState(null);
 
-  const handlePhotoChange = (e) => {
-    const files = Array.from(e.target.files).slice(0, 5);
-    setPhotos(prev => [...prev, ...files].slice(0, 5));
-    const newPreviews = files.map(f => URL.createObjectURL(f));
-    setPreviews(prev => [...prev, ...newPreviews].slice(0, 5));
-  };
+  const placeMarker = useCallback((lat, lng) => {
+    const L = leafletRef.current;
+    const map = mapInstance.current;
+    if (!L || !map) return;
 
-  const removePhoto = (idx) => {
-    setPhotos(p => p.filter((_, i) => i !== idx));
-    setPreviews(p => {
-      URL.revokeObjectURL(p[idx]);
-      return p.filter((_, i) => i !== idx);
-    });
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!location) {
-      setError('Please select a location on the map');
-      return;
+    if (markerRef.current) {
+      markerRef.current.setLatLng([lat, lng]);
+    } else {
+      markerRef.current = L.marker([lat, lng], { draggable: true }).addTo(map);
+      markerRef.current.on('dragend', () => {
+        const pos = markerRef.current.getLatLng();
+        setLocation({ lat: pos.lat, lng: pos.lng });
+      });
     }
-    if (!form.description.trim()) {
-      setError('Please add a description');
+    map.setView([lat, lng], Math.max(map.getZoom(), 16));
+    setLocation({ lat, lng });
+  }, []);
+
+  useEffect(() => {
+    if (!mapRef.current || mapInstance.current) return;
+    let cancelled = false;
+
+    import('leaflet').then(L => {
+      if (cancelled || !mapRef.current) return;
+      import('leaflet/dist/leaflet.css');
+      delete L.Icon.Default.prototype._getIconUrl;
+      L.Icon.Default.mergeOptions({
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+        iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+      });
+      leafletRef.current = L;
+
+      const map = L.map(mapRef.current).setView(LEBANON_CENTER, 9);
+      mapInstance.current = map;
+
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap',
+        maxZoom: 19
+      }).addTo(map);
+
+      map.on('click', (e) => {
+        placeMarker(e.latlng.lat, e.latlng.lng);
+      });
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (cancelled) return;
+            placeMarker(pos.coords.latitude, pos.coords.longitude);
+            setLocating(false);
+          },
+          () => setLocating(false),
+          { enableHighAccuracy: true, timeout: 8000 }
+        );
+      } else {
+        setLocating(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (mapInstance.current) {
+        mapInstance.current.remove();
+        mapInstance.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, [placeMarker]);
+
+  const handleRecenter = () => {
+    if (!navigator.geolocation) return;
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        placeMarker(pos.coords.latitude, pos.coords.longitude);
+        setLocating(false);
+      },
+      () => setLocating(false),
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+  };
+
+  const handleSubmit = async () => {
+    if (!location) {
+      setError('Tap the map or use GPS to set location');
       return;
     }
 
@@ -58,132 +121,138 @@ export default function NewReportPage() {
 
     try {
       const fd = new FormData();
-      fd.append('description', form.description.trim());
-      fd.append('severity', form.severity);
+      fd.append('severity', severity);
       fd.append('latitude', location.lat);
       fd.append('longitude', location.lng);
-      fd.append('address', form.address.trim());
       fd.append('reporter_name', userName.trim() || 'Anonymous');
-      photos.forEach(p => fd.append('photos', p));
 
       const report = await api.createReport(fd);
-      navigate(`/report/${report.id}`);
+      setSubmitted(report);
     } catch (err) {
       setError(err.message);
-    } finally {
       setSubmitting(false);
     }
   };
 
+  if (submitted) {
+    return (
+      <div className="flex flex-col items-center justify-center py-12 text-center space-y-5">
+        <div className="flex h-20 w-20 items-center justify-center rounded-full bg-brand-100">
+          <svg className="h-10 w-10 text-brand-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-gray-900">Pin Dropped!</h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Pothole reported. You can add details anytime.
+          </p>
+        </div>
+        <div className="flex gap-3 w-full max-w-xs">
+          <button
+            onClick={() => navigate(`/report/${submitted.id}`)}
+            className="btn-primary flex-1"
+          >
+            Add Details
+          </button>
+          <button
+            onClick={() => {
+              setSubmitted(null);
+              setSubmitting(false);
+              setLocation(null);
+              if (markerRef.current && mapInstance.current) {
+                mapInstance.current.removeLayer(markerRef.current);
+                markerRef.current = null;
+              }
+            }}
+            className="btn-secondary flex-1"
+          >
+            Report Another
+          </button>
+        </div>
+        <button
+          onClick={() => navigate('/')}
+          className="text-sm text-gray-500 hover:text-gray-700"
+        >
+          Back to Feed
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <h2 className="text-lg font-bold text-gray-900">Report a Pothole</h2>
+    <div className="space-y-4">
+      <div className="text-center">
+        <h2 className="text-lg font-bold text-gray-900">Drop a Pin</h2>
+        <p className="text-sm text-gray-500">Tap the map or use GPS. Add details later.</p>
+      </div>
 
       {error && (
-        <div className="card border-red-200 bg-red-50 text-sm text-red-600">{error}</div>
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-center text-sm text-red-600">{error}</div>
+      )}
+
+      <div className="relative overflow-hidden rounded-2xl border border-gray-200 shadow-sm" style={{ height: 'calc(100vh - 340px)', minHeight: 280 }}>
+        {locating && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <svg className="h-7 w-7 animate-spin text-brand-600" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
+              <span className="text-xs font-medium text-gray-600">Getting your location...</span>
+            </div>
+          </div>
+        )}
+        <div ref={mapRef} className="h-full w-full" />
+
+        <button
+          onClick={handleRecenter}
+          className="absolute bottom-3 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-white shadow-lg border border-gray-200 hover:bg-gray-50 transition"
+          title="Use my location"
+        >
+          <svg className="h-5 w-5 text-brand-700" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+          </svg>
+        </button>
+      </div>
+
+      {location && (
+        <p className="text-center text-xs text-gray-400">
+          {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
+        </p>
       )}
 
       <div>
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">Your Name</label>
-        <input
-          type="text"
-          className="input-field"
-          placeholder="Anonymous"
-          value={userName}
-          onChange={e => setUserName(e.target.value)}
-        />
-      </div>
-
-      <div>
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">Description *</label>
-        <textarea
-          className="input-field min-h-[80px] resize-y"
-          placeholder="Describe the pothole location and condition..."
-          value={form.description}
-          onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-          rows={3}
-        />
-      </div>
-
-      <div>
-        <label className="mb-2 block text-sm font-medium text-gray-700">Severity *</label>
-        <div className="grid grid-cols-2 gap-2">
-          {SEVERITY_OPTIONS.map(opt => (
+        <label className="mb-1.5 block text-center text-sm font-medium text-gray-600">How bad is it?</label>
+        <div className="flex justify-center gap-2">
+          {SEVERITY_QUICK.map(opt => (
             <button
               key={opt.value}
               type="button"
-              onClick={() => setForm(f => ({ ...f, severity: opt.value }))}
-              className={`rounded-xl border-2 p-3 text-left transition ${
-                form.severity === opt.value ? opt.color : 'border-gray-200 bg-white text-gray-600'
+              onClick={() => setSeverity(opt.value)}
+              className={`flex flex-col items-center rounded-xl px-4 py-2 text-xs font-semibold transition border-2 ${
+                severity === opt.value
+                  ? 'border-brand-500 bg-brand-50 text-brand-800 shadow-sm'
+                  : 'border-gray-200 bg-white text-gray-500 hover:border-gray-300'
               }`}
             >
-              <span className="block text-sm font-semibold">{opt.label}</span>
-              <span className="block text-xs opacity-70">{opt.desc}</span>
+              <span className="text-lg leading-none mb-0.5">{opt.emoji}</span>
+              {opt.label}
             </button>
           ))}
         </div>
       </div>
 
-      <LocationPicker value={location} onChange={setLocation} />
-
-      <div>
-        <label className="mb-1.5 block text-sm font-medium text-gray-700">Street / Area Name</label>
-        <input
-          type="text"
-          className="input-field"
-          placeholder="e.g. Hamra Street, Beirut"
-          value={form.address}
-          onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-        />
-      </div>
-
-      <div>
-        <label className="mb-2 block text-sm font-medium text-gray-700">Photos (up to 5)</label>
-        <div className="flex flex-wrap gap-2">
-          {previews.map((src, i) => (
-            <div key={i} className="relative h-20 w-20 rounded-xl overflow-hidden bg-gray-100 ring-1 ring-gray-200">
-              <img src={src} alt="" className="h-full w-full object-cover" />
-              <button
-                type="button"
-                onClick={() => removePhoto(i)}
-                className="absolute top-0.5 right-0.5 rounded-full bg-black/50 p-0.5 text-white hover:bg-black/70"
-              >
-                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-          ))}
-          {photos.length < 5 && (
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="flex h-20 w-20 flex-col items-center justify-center rounded-xl border-2 border-dashed border-gray-300 text-gray-400 transition hover:border-brand-400 hover:text-brand-600"
-            >
-              <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z" /></svg>
-              <span className="text-[10px] font-medium mt-0.5">Add Photo</span>
-            </button>
-          )}
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          capture="environment"
-          className="hidden"
-          onChange={handlePhotoChange}
-        />
-      </div>
-
-      <button type="submit" disabled={submitting} className="btn-primary w-full">
+      <button
+        onClick={handleSubmit}
+        disabled={submitting || !location}
+        className="btn-primary w-full !py-3.5 !text-base"
+      >
         {submitting ? (
-          <>
-            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
-            Submitting...
-          </>
+          <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" /></svg>
         ) : (
-          'Submit Report'
+          <>
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" /></svg>
+            Drop Pin
+          </>
         )}
       </button>
-    </form>
+    </div>
   );
 }

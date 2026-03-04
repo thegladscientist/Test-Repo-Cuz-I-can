@@ -9,6 +9,15 @@ async function request(url, options = {}) {
   return res.json();
 }
 
+async function multipartRequest(url, method, formData) {
+  const res = await fetch(`${BASE}${url}`, { method, body: formData });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 export const api = {
   getReports: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
@@ -17,14 +26,9 @@ export const api = {
 
   getReport: (id) => request(`/reports/${id}`),
 
-  createReport: (formData) =>
-    fetch(`${BASE}/reports`, { method: 'POST', body: formData }).then(async res => {
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || 'Failed to create report');
-      }
-      return res.json();
-    }),
+  createReport: (formData) => multipartRequest('/reports', 'POST', formData),
+
+  updateReport: (id, formData) => multipartRequest(`/reports/${id}`, 'PATCH', formData),
 
   updateStatus: (id, status) =>
     request(`/reports/${id}/status`, {

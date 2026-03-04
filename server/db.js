@@ -16,7 +16,7 @@ db.pragma('foreign_keys = ON');
 db.exec(`
   CREATE TABLE IF NOT EXISTS reports (
     id TEXT PRIMARY KEY,
-    description TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     severity TEXT NOT NULL CHECK(severity IN ('low','medium','high','critical')),
     latitude REAL NOT NULL,
     longitude REAL NOT NULL,
